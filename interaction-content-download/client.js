@@ -2,6 +2,8 @@ const axios = require("axios");
 const axiosRateLimit = require("axios-rate-limit");
 const axiosRetry = require("retry-axios");
 const fs = require("fs").promises;
+const uploadFile = require('./aws');
+const failLogger = require('simple-node-logger').createSimpleLogger('failLogger.log');
 
 class IcsClient {
   /***
@@ -18,7 +20,7 @@ class IcsClient {
     );
     this._icsClient.defaults.raxConfig = {
       instance: this._icsClient,
-      retries: 3,
+      retries: 5,
       retryDelay: 10000,
       backoffType: "exponential",
       statusCodesToRetry: [
@@ -107,17 +109,29 @@ class IcsClient {
         })
       )
       .then(
-        (r) => this._saveToDisk(r, interactionId, contentKey),
+        // (r) => this._saveToDisk(r, interactionId, contentKey),
+        async (r) => {
+          const fileExtension = this._determineExtension(
+            r.headers
+          )
+          const fileName = `${interactionId}${fileExtension}`
+          return uploadFile(r.data, fileName)
+        },
         (e) => {
           console.error(
             `Content ${contentKey} couldn't be downloaded for ${interactionId} - ${contentUrl}`,
             e.response
           );
+          failLogger.info('request level: ', interactionId)
           throw e;
         }
       )
-      .then(() =>
+      .then(() => {
         console.log(`Content ${contentKey} was downloaded for ${interactionId}`)
+      },
+      (e) => {
+        failLogger.info('after request, thenable fail: ', interactionId)
+      }
       );
   }
 
@@ -137,8 +151,12 @@ class IcsClient {
     );
     return Promise.all(
       contentList.map((c) => this.downloadContent(interactionId, c.contentKey))
-    ).then(() =>
+    ).then(() => {
       console.log(`All content for interaction ${interactionId} downloaded\n`)
+    },
+    (e) => {
+      failLogger.info('before request', interactionId)
+    }
     );
   }
 
