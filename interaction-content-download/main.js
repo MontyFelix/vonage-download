@@ -1,22 +1,45 @@
 const fork = require('child_process').fork;
 const moment = require('moment');
+const processedDates = require('simple-node-logger').createSimpleLogger('processedDatesLogger.log');
 
-let startDate = moment()
-let endDateDate = moment(startDate).subtract(1, 'weeks')
-console.log(startDate.toISOString(), endDateDate.toISOString())
-const ls = fork('app.js', ['--start=2021-09-28T00:01:00Z', '--end=2021-09-28T00:02:00Z']);
+// probably best to substitute with process argv for starting point
+let endDate = moment();
+const tillDate = moment(endDate).subtract(545, 'days');
+let startDate = moment(endDate).subtract(1, 'weeks');
 
-ls.on('data', (data) => {
-    console.log(`stdout: ${data}`);
-});
+async function* generateWeek() {
+    while(endDate.isSameOrAfter(tillDate)) {
+        yield await doFork(startDate, endDate);
+    }
+}
 
-ls.on('data', (data) => {
-    console.log(`stderr: ${data}`);
-});
+(async function() {
+    for await (let week of generateWeek()) {
+        processedDates.info(`processed start: ${startDate} - end ${endDate} EXIT with: ${week}`)
+        endDate = moment(startDate)
+        startDate = moment(startDate).subtract(1, 'weeks');
+    }
+})()
 
-ls.on('close', (code) => {
-    //check endDateDate to be sameOrAfter date - 545 days
-    //check exit code and execute fork('app.js', [with further dates])
-    console.log(`child process exited with code ${code}`);
-    // possibly on error exit code do a rerun of current dates
-});
+
+function doFork(start, end) {
+    return new Promise((resolve, reject) => {
+        let ls = fork('app.js', [`--start=${start.toISOString()}`, `--end=${end.toISOString()}`]);
+
+        // ls.on('data', (data) => {
+        //     console.log(`stdout: ${data}`);
+        // });
+        
+        ls.on('error', (error) => {
+            console.log(`stderr: ${error}`);
+            reject(error)
+        });
+        // ls.on('exit', (code) => {
+        //     console.log('exit', code)
+        // })
+        ls.on('close', (code) => {
+            console.log(`child process exited with code ${code}`);
+            resolve(code);
+        });
+    })
+}
